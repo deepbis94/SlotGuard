@@ -27,13 +27,21 @@ Open [http://localhost:8080](http://localhost:8080) and connect with:
 
 | Field    | Value      |
 |----------|------------|
-| System   | PostgreSQL |
+| **System** | **PostgreSQL** (not the MySQL default — that produces `db: Connection refused`) |
 | Server   | `db`       |
 | Username | `slotguard`|
 | Password | `secret`   |
 | Database | `slotguard`|
 
-These match `.env.example` and `docker-compose.yml`. From a client on the host (TablePlus, `psql`, Cursor), use server `127.0.0.1` instead of `db` — `db` is only a Docker DNS name.
+These match `.env.example` and `docker-compose.yml`.
+
+A Compose plugin pre-selects **PostgreSQL** so Adminer does not try MySQL on the `db` hostname (that is what produces `db: Connection refused`). After pulling this change, recreate Adminer:
+
+```bash
+docker compose up -d adminer
+```
+
+From a client on the host (TablePlus, `psql`, Cursor), use server `127.0.0.1` instead of `db` — `db` is only a Docker DNS name.
 
 ### Tests
 
