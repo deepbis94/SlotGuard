@@ -28,4 +28,4 @@ HTML;
     }
 }
 
-return new AdminerDefaultPgsql();
+return new AdminerDefaultPgsql;
