@@ -1,5 +1,7 @@
 # SlotGuard
 
+[![CI](https://github.com/deepbis94/SlotGuard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/deepbis94/SlotGuard/actions/workflows/ci.yml)
+
 JSON API for booking appointments against a provider's calendar. A customer can reserve a service in a time window; the system **never** allows two confirmed bookings for the same service to overlap — including under concurrent requests.
 
 This is an API-only Laravel app. There is no UI, auth, or email.
