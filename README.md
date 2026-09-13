@@ -1,5 +1,7 @@
 # SlotGuard
 
+[![CI](https://github.com/deepbis94/SlotGuard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/deepbis94/SlotGuard/actions/workflows/ci.yml)
+
 JSON API for booking appointments against a provider's calendar. A customer can reserve a service in a time window; the system **never** allows two confirmed bookings for the same service to overlap — including under concurrent requests.
 
 This is an API-only Laravel app. There is no UI, auth, or email.
@@ -47,13 +49,17 @@ From a client on the host (TablePlus, `psql`, Cursor), use server `127.0.0.1` in
 
 ```bash
 docker compose exec app php artisan test
+docker compose exec app vendor/bin/pint --test
 ```
 
 Or, if PHP 8.3+ and Composer are installed locally:
 
 ```bash
 php artisan test
+vendor/bin/pint --test
 ```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs both on every push and pull request: PHPUnit against in-memory SQLite, then Pint.
 
 The PHPUnit suite uses **SQLite in-memory**. `phpunit.xml` sets `DB_CONNECTION=sqlite` / `DB_DATABASE=:memory:` with `force="true"`, and `Tests\TestCase::createApplication()` also pins the default connection to SQLite and purges any connection opened under Compose's `DB_CONNECTION=pgsql`. That keeps tests fast, zero-config, and isolated from the Docker Postgres volume. It is **not** the same engine as production PostgreSQL — see [Assumptions](#assumptions) and [Key technical decisions](#key-technical-decisions).
 
@@ -136,7 +142,7 @@ Every product decision that was not specified:
 3. **No frontend.** JSON API only. `GET /` returns a machine-readable index of endpoints.
 4. **Single provider per service.** A `services` row *is* one provider's calendar. There is no `providers` table and no `provider_id`. Multi-provider support would add that column and lock/exclude on `(provider_id, …)` instead of `service_id`.
 5. **Timezone is UTC.** `APP_TIMEZONE=UTC` and `BOOKING_TIMEZONE=UTC`. Incoming ISO-8601 values are converted to UTC. `daily_start_time` / `daily_end_time` are wall-clock times in that timezone. Send offsets (`2026-09-15T10:00:00Z` or `2026-09-15T15:30:00+05:30`); naive datetimes are interpreted as UTC.
-6. **Cancellation window is 24 hours**, configurable via `BOOKING_CANCELLATION_WINDOW_HOURS` / `config/booking.php`. A booking may be cancelled when `now < starts_at - window`. Past bookings cannot be cancelled (they are inside the window).
+6. **Cancellation window is 24 hours**, configurable via `BOOKING_CANCELLATION_WINDOW_HOURS` / `config/booking.php`. A booking may be cancelled when `now < starts_at - window`. Past bookings cannot be cancelled (they are inside the window). Double-cancel returns **422** (the request is invalid given current state). Slot contention stays **409**. 409 would also be defensible for double-cancel; 422 is the consistent choice here.
 7. **SQLite for tests, PostgreSQL for Docker/dev/prod.** The GiST `EXCLUDE` constraint is created only when the migration driver is `pgsql`. SQLite tests rely on the application overlap check. `lockForUpdate()` is a no-op on SQLite (SQLite locks the whole database on write anyway).
 8. **PHP 8.3+ / Laravel 13.** Latest stable Laravel requires PHP 8.3. The Docker image is `php:8.3-fpm`. The spec's "PHP 8.2+" is satisfied by 8.3.
 9. **Overnight bookings are rejected.** If `ends_at` falls on a later calendar day than `starts_at` (in the booking timezone), the request is treated as exceeding daily hours (`422`).
@@ -150,7 +156,7 @@ Every product decision that was not specified:
 
 ### Transaction + `lockForUpdate`
 
-`BookingService::create()` runs inside a DB transaction. It locks the **service** row (`SELECT … FOR UPDATE`) *before* computing `ends_at`, checking hours, checking overlap, and inserting. Concurrent bookers for the same service serialize on that row lock; only one check+insert proceeds at a time. Cancelled bookings for other customers do not hold the slot.
+`BookingService::create()` runs inside a DB transaction. It locks the **service** row (`SELECT … FOR UPDATE`) *before* computing `ends_at`, checking hours, checking overlap, and inserting. Concurrent bookers for the same service serialize on that row lock; only one check+insert proceeds at a time. That caps throughput per service — acceptable while one service is one calendar. Multi-provider would lock/exclude on `provider_id` instead. Cancelled bookings for other customers do not hold the slot.
 
 ### PostgreSQL `EXCLUDE` constraint (the safety net)
 
@@ -196,7 +202,9 @@ PHPUnit is single-threaded and the in-memory SQLite database is per-connection. 
 ## Limitations and what I'd improve with more time
 
 - **Auth and tenancy.** Customer identity, provider accounts, and rate limiting.
-- **Real parallel tests.** A Postgres-only group that opens two connections and contends on `lockForUpdate`, plus a test that a raw overlapping `INSERT` hits `23P01`.
+- **Real parallel tests.** A Postgres-only group that opens two connections and contends on `lockForUpdate`, plus a test that a raw overlapping `INSERT` hits `23P01`. `ConcurrentBookingTest` is sequential by design (PHPUnit + in-memory SQLite).
+- **Maximum lead time.** There is no upper bound on `starts_at`; a booking years ahead is accepted if it is in the future and inside daily hours.
+- **Service admin API.** Services are created by the seeder/factories, not HTTP. On PostgreSQL, `CHECK` constraints require `duration_minutes > 0` and `daily_end_time > daily_start_time` so a bad row cannot be inserted even off-API. SQLite tests skip those CHECKs (same split as the GiST exclude).
 - **Availability / slots endpoint.** `GET /api/services/{id}/slots?date=` would make clients simpler.
 - **Idempotency keys** on `POST` so retries do not look like a second customer.
 - **Per-service timezone** instead of a global `BOOKING_TIMEZONE`.
