@@ -142,7 +142,6 @@ class BookingService
 
     private function isExclusionViolation(QueryException $e): bool
     {
-        return $e->getCode() === '23P01'
-            || str_contains(strtolower($e->getMessage()), 'exclusion');
+        return $e->getCode() === '23P01';
     }
 }
